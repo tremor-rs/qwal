@@ -19,7 +19,7 @@ Pronouced `Quál` - from the german wordrd for `agony` - because it is.
 
 ## Operations
 
-The basic concept is simple, qual supports exactly 3 opperations:
+The basic concept is simple, qual supports exactly 4 opperations:
 
 ### `push` 
 
@@ -33,6 +33,10 @@ is fully consumed.
 ### `ack`
 
 Acknowledges the processing of a entry, this means that in the entry can be removed.
+
+### `revert`
+
+Reverts back to the last acknowledged entry - will anything since then.
 
 
 ## Performance Characteristics

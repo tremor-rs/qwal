@@ -66,6 +66,10 @@ pub struct Wal {
 }
 
 impl Wal {
+    pub async fn revert(&mut self) -> Result<()> {
+        unimplemented!()
+    }
+
     fn format_file_name(idx: u64) -> String {
         format!("{:020}", idx)
     }
