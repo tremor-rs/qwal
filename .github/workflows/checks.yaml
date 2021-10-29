@@ -1,0 +1,53 @@
+name: Checks
+
+on: [push, pull_request]
+
+jobs:
+  license:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Check license headers
+        run: ./.github/checks/copyright.sh
+  sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Safety checks
+        run: ./.github/checks/safety.sh -a
+  unused-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install deps
+        run: sudo snap install remarshal
+      - name: Install deps
+        run: sudo snap install --classic ripgrep
+      - uses: actions/checkout@v1
+      - name: Check for unused dependencies
+        run: ./.github/checks/deps.sh .
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          override: true
+          profile: minimal
+          components: rustfmt
+      - name: Check Formating
+        run: cargo fmt --all -- --check
+  clippy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Install deps
+        run: sudo apt-get -qy update && sudo apt-get install -y libssl-dev libssl1.1
+      - uses: actions-rs/toolchain@v1
+        with:
+          override: true
+          profile: minimal
+          components: clippy
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all
