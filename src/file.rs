@@ -19,9 +19,17 @@ use std::{
     mem::size_of,
 };
 
+#[cfg(test)]
 macro_rules! trace {
     ($s:expr $(, $opt:expr)*) => {
         eprintln!(concat!("[{}:{}] ", $s), file!(), line!(), $($opt),*)
+    };
+}
+
+#[cfg(not(test))]
+macro_rules! trace {
+    ($s:expr $(, $opt:expr)*) => {
+        ()
     };
 }
 
