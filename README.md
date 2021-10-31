@@ -1,13 +1,15 @@
-# Repository Template&emsp; [![Discord]][discord-invite] ![Build Status] ![Quality Checks] ![License Checks] ![Security Checks] [![Code Coverage]][coveralls.io]
+# Repository Template&emsp; [![Build Status]][tests.yml] [![Quality Checks]][checks.yml] [![License Checks]][licenses.yml] [![Security Checks]][security.yaml] [![Code Coverage]][coveralls.io]
 
-[build status]: https://github.com/tremor-rs/qwal/workflows/Tests/badge.svg
-[quality checks]: https://github.com/tremor-rs/qwal/workflows/Checks/badge.svg
-[license checks]: https://github.com/tremor-rs/qwal/workflows/License%20audit/badge.svg
-[security checks]: https://github.com/tremor-rs/qwal/workflows/Security%20audit/badge.svg
+[Build Status]: https://github.com/tremor-rs/qwal/workflows/Tests/badge.svg
+[tests.yml]: https://github.com/tremor-rs/qwal/actions/workflows/tests.yml
+[Quality Checks]: https://github.com/tremor-rs/qwal/workflows/Checks/badge.svg
+[checks.yml]: https://github.com/tremor-rs/qwal/actions/workflows/checks.yml
+[License Checks]: https://github.com/tremor-rs/qwal/workflows/License%20audit/badge.svg
+[licenses.yml]: https://github.com/tremor-rs/qwal/actions/workflows/licenses.yaml
+[Security Checks]: https://github.com/tremor-rs/qwal/workflows/Security%20audit/badge.svg
+[security.yaml]: https://github.com/tremor-rs/qwal/actions/workflows/security.yaml
 [code coverage]: https://coveralls.io/repos/github/tremor-rs/qwal/badge.svg?branch=main
 [coveralls.io]: https://coveralls.io/github/tremor-rs/qwal?branch=main
-[discord]: https://img.shields.io/discord/752801695066488843.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2
-[discord-invite]: https://bit.ly/tremor-discord
 
 **Queue like disk backed WAL**
 
