@@ -4,7 +4,7 @@ count=0
 help() {
     cat <<EOF
 Usage: ${0##*/} [-hd] [TEST]...
-code sanity checker
+code safety checker
   -h         show this help
   -a         run all checks
   -u         check for unwrap
@@ -15,6 +15,7 @@ code sanity checker
   -e         check for expect
   -d         check for dbg!
   -t         check for todo!
+  -m         check for transmute
   -x         check for std::process::exit
   -b         check for bracket access
   -c         check for pedantic and other checks
@@ -26,14 +27,14 @@ EOF
 
 files=$(find . -name '*.rs' | grep -v -f .checkignore)
 
-while getopts hauiprebldxcft opt; do
+while getopts hamuiprebldxcft opt; do
     case $opt in
         h)
             help
             exit 0
             ;;
         a)
-            exec "$0" -uirpeldxcftb
+            exec "$0" -uirpeldxcftbm
             ;;
         u)
             for file in $files
@@ -41,6 +42,7 @@ while getopts hauiprebldxcft opt; do
                 if sed -e '/mod test.*/,$d' -e '/ALLOW: /{N;d;}' "$file" | grep -v '^[ ]*//' |  grep 'unwrap()' > /dev/null
                 then
                     echo "##[error] unwrap found in $file don't unwrap it panics."
+                    grep -nH 'unwrap()' "$file"
                     count=$((count + 1))
                 fi
             done
@@ -111,8 +113,17 @@ while getopts hauiprebldxcft opt; do
                 fi
             done
             ;;
-
-
+        m)
+            for file in $files
+            do
+                if sed -e '/ALLOW: /{N;d;}' "$file" | grep 'transmute' > /dev/null
+                then
+                    echo "##[error] transmute found in \"$file\". Don't do it! If you got to add a tracking ticket and link it in ALLOW"
+                    grep -nH 'transmute' "$file"
+                    count=$((count + 1))
+                fi
+            done
+            ;;
         x)
             for file in $files
             do
