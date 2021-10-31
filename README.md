@@ -1,11 +1,11 @@
-# Repository Template&emsp; [![Build Status]][tests.yml] [![Quality Checks]][checks.yml] [![License Checks]][licenses.yml] [![Security Checks]][security.yaml] [![Code Coverage]][coveralls.io]
+# Repository Template&emsp; [![Build Status]][tests.yaml] [![Quality Checks]][checks.yaml] [![License Checks]][licenses.yaml] [![Security Checks]][security.yaml] [![Code Coverage]][coveralls.io]
 
 [Build Status]: https://github.com/tremor-rs/qwal/workflows/Tests/badge.svg
-[tests.yml]: https://github.com/tremor-rs/qwal/actions/workflows/tests.yml
+[tests.yaml]: https://github.com/tremor-rs/qwal/actions/workflows/tests.yaml
 [Quality Checks]: https://github.com/tremor-rs/qwal/workflows/Checks/badge.svg
-[checks.yml]: https://github.com/tremor-rs/qwal/actions/workflows/checks.yml
+[checks.yaml]: https://github.com/tremor-rs/qwal/actions/workflows/checks.yaml
 [License Checks]: https://github.com/tremor-rs/qwal/workflows/License%20audit/badge.svg
-[licenses.yml]: https://github.com/tremor-rs/qwal/actions/workflows/licenses.yaml
+[licenses.yaml]: https://github.com/tremor-rs/qwal/actions/workflows/licenses.yaml
 [Security Checks]: https://github.com/tremor-rs/qwal/workflows/Security%20audit/badge.svg
 [security.yaml]: https://github.com/tremor-rs/qwal/actions/workflows/security.yaml
 [code coverage]: https://coveralls.io/repos/github/tremor-rs/qwal/badge.svg?branch=main
