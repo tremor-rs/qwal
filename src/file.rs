@@ -40,13 +40,16 @@ use async_std::{
 };
 use byteorder::{BigEndian, ByteOrder};
 
+/// Represents entries in a write-ahead-log index data file
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum WalData {
+    // Entry is a data record
     Data {
         idx: u64,
         ack_idx: u64,
         data: Vec<u8>,
     },
+    /// Entry is an acknowledgement record
     Ack {
         idx: u64,
         ack_idx: u64,
@@ -150,11 +153,15 @@ impl WalData {
         }
         Ok(self.size_on_disk())
     }
+
+    /// Fetches the index of the most recent acknowledgement
     pub fn ack_idx(&self) -> u64 {
         match self {
             WalData::Data { ack_idx, .. } | WalData::Ack { ack_idx, .. } => *ack_idx,
         }
     }
+
+    /// Fetches the curent index
     pub fn idx(&self) -> u64 {
         match self {
             WalData::Data { idx, .. } | WalData::Ack { idx, .. } => *idx,
@@ -162,18 +169,28 @@ impl WalData {
     }
 }
 
+/// Represents an data file in a write-ahead-log-structure
 #[derive(Debug)]
 pub(crate) struct WalFile {
+    /// Reference to the data file
     pub(crate) file: File,
+    /// The next index to be written
     pub(crate) next_idx_to_write: u64,
+    /// The write offset
     pub(crate) write_offset: u64,
+    /// The next index to be read
     pub(crate) next_idx_to_read: u64,
+    /// The read offset
     pub(crate) read_offset: u64,
+    /// The index for acknowledged entries
     pub(crate) ack_idx: u64,
+    /// The most recent acknowledgement offset
     pub(crate) ack_written: u64,
 }
 
 impl WalFile {
+
+    /// Persists an acknowledgement at the end of the data file at the after the last committed write operation
     pub(crate) async fn preserve_ack(&mut self) -> Result<()> {
         trace!("Appending ack index {} to {:?}", self.ack_idx, self.file);
 
@@ -186,6 +203,8 @@ impl WalFile {
         data.write(&mut self.file).await?;
         self.file.sync_all().await
     }
+
+    /// Closes this write-ahead-log data file
     pub async fn close(mut self) -> Result<()> {
         trace!("Closing WAL file {:?}", self);
         if self.ack_written != self.ack_idx {
@@ -193,6 +212,8 @@ impl WalFile {
         }
         Ok(())
     }
+
+    /// Push an entry into the write-ahead-log data file
     pub async fn push<E>(&mut self, data: E) -> Result<u64>
     where
         E: Entry,
@@ -213,6 +234,7 @@ impl WalFile {
         Ok(idx)
     }
 
+    /// Pop an entry from the write-ahead-log data file
     pub async fn pop<E>(&mut self) -> Result<Option<(u64, E)>>
     where
         E: Entry,
@@ -232,6 +254,7 @@ impl WalFile {
         }
     }
 
+    /// Convenience for debugging
     pub async fn inspect<P, E>(path: P) -> Result<()>
     where
         P: AsRef<Path>,
@@ -248,6 +271,7 @@ impl WalFile {
         Ok(())
     }
 
+    /// Open a write-ahead-log data file
     pub async fn open<P>(path: P) -> Result<Self>
     where
         P: AsRef<Path>,
@@ -311,10 +335,13 @@ impl WalFile {
             })
         }
     }
+
+    /// Retrieve the write offset for this data file
     pub fn size(&self) -> u64 {
         self.write_offset
     }
 
+    // Seek to a specified index for the next read operation
     pub async fn seek_to(&mut self, next_idx_to_read: u64) -> Result<()> {
         trace!("Seeking to {} in {:?}", next_idx_to_read, self.file);
         self.file.seek(SeekFrom::Start(0)).await?;
@@ -364,10 +391,12 @@ impl WalFile {
         }
         Ok(())
     }
+
     async fn pos(&mut self) -> Result<u64> {
         self.file.seek(SeekFrom::Current(0)).await
     }
 
+    // Mark up to the specified index as acknowledged
     pub fn ack(&mut self, idx: u64) {
         trace!("Marking ack as {} in {:?}", idx, self.file);
         self.ack_idx = idx;

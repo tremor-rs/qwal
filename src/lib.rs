@@ -39,8 +39,10 @@ use async_std::{
     prelude::*,
 };
 
+/// Normalize errors in this crate to std::io::Result<T>
 pub type Result<T> = std::io::Result<T>;
 
+/// Represents a serializable entry in the write-ahead-log
 pub trait Entry {
     fn serialize(self) -> Vec<u8>;
     fn deserialize(data: Vec<u8>) -> Self;
@@ -56,8 +58,11 @@ impl Entry for Vec<u8> {
     }
 }
 
+/// The primary struct for the write-ahead log provided in this crate
 pub struct Wal {
+    /// The path to an instance of a write-ahead-log
     dir: PathBuf,
+    /// Dictionary of indexes and their associated index files
     files: Vec<(u64, PathBuf)>,
     read_file: Option<WalFile>,
     write_file: WalFile,
@@ -81,6 +86,8 @@ impl Wal {
         }
         Ok(())
     }
+
+    /// Push a new entry into the write-ahead-log, error if the operation fails
     pub async fn push<E>(&mut self, data: E) -> Result<u64>
     where
         E: Entry,
@@ -114,6 +121,7 @@ impl Wal {
         Ok(idx)
     }
 
+    /// Pop an existing entry from the write-ahead-log, error if the operation fails
     pub async fn pop<E>(&mut self) -> Result<Option<(u64, E)>>
     where
         E: Entry,
@@ -146,6 +154,7 @@ impl Wal {
         self.write_file.pop().await
     }
 
+    /// Open a write-ahead-log given a path to a directory containing the write-ahead-log
     pub async fn open<P>(path: P, chunk_size: u64, max_chunks: usize) -> Result<Self>
     where
         P: AsRef<Path>,
@@ -222,6 +231,7 @@ impl Wal {
         }
     }
 
+    /// Acknowledge entries up to a specified index in the write-ahead-log
     pub async fn ack(&mut self, id: u64) -> Result<()> {
         trace!("ACKing {}", id);
         self.write_file.ack(id);
