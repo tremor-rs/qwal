@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{Entry, Result};
+use super::{Entry, Error, Result};
 
-use std::{
-    io::{Error, ErrorKind, SeekFrom},
-    mem::size_of,
-};
+use std::{io::SeekFrom, mem::size_of};
 
 #[cfg(test)]
 macro_rules! trace {
@@ -29,7 +26,7 @@ macro_rules! trace {
 #[cfg(not(test))]
 macro_rules! trace {
     ($s:expr $(, $opt:expr)*) => {
-        ()
+        concat!("[{}:{}] ", $s);
     };
 }
 
@@ -75,7 +72,7 @@ impl WalData {
             f.read_exact(&mut buf).await?;
             let len2 = BigEndian::read_u64(&buf);
             if len2 != 0 {
-                Err(Error::new(ErrorKind::Other, "Invalid WAL entry (ACK)"))
+                Err(Error::InvalidAck)
             } else {
                 Ok(Some(Self::Ack { ack_idx, idx }))
             }
@@ -89,7 +86,7 @@ impl WalData {
             f.read_exact(&mut buf).await?;
             let len2 = BigEndian::read_u64(&buf);
             if len2 != len {
-                Err(Error::new(ErrorKind::Other, "Invalid WAL entry (Data)"))
+                Err(Error::InvalidEntry)
             } else {
                 Ok(Some(Self::Data { idx, ack_idx, data }))
             }
@@ -123,7 +120,7 @@ impl WalData {
                 BigEndian::write_u64(&mut buf[0..], len as u64); //len
                 BigEndian::write_u64(&mut buf[8..], *idx); // idx
                 BigEndian::write_u64(&mut buf[16..], *ack_idx); // ack
-                buf[24..(size_on_disk - 8)].clone_from_slice(&data); // data
+                buf[24..(size_on_disk - 8)].clone_from_slice(data); // data
                 BigEndian::write_u64(&mut buf[(24 + len)..], len as u64); // len2
                 w.write_all(&buf).await?;
             }
@@ -175,7 +172,7 @@ pub struct WalFile {
 
 impl WalFile {
     async fn sync(&self) -> Result<()> {
-        self.file.sync_all().await
+        self.file.sync_all().await.map_err(Error::Io)
     }
 
     /// Persists an acknowledgement at the end of the data file at the after the last committed write operation
@@ -222,7 +219,6 @@ impl WalFile {
         Ok(idx)
     }
 
-    pub async fn pop<E>(&mut self) -> Result<Option<(u64, E)>>
     /// Pop an entry from the write-ahead-log data file
     pub async fn pop<E>(&mut self) -> Result<Option<(u64, E::Output)>>
     where
@@ -266,10 +262,10 @@ impl WalFile {
         P: AsRef<Path>,
     {
         let p: &Path = path.as_ref();
+        let mut o = OpenOptions::new();
+        trace!("Opening existing WAL file: {:?}", p.to_string_lossy());
         if p.exists().await {
-            trace!("Opening existing WAL file: {:?}", p.to_str().unwrap());
-
-            let mut o = OpenOptions::new();
+            trace!("  Opening...");
             o.create(false);
             o.write(true);
             o.read(true);
@@ -285,9 +281,7 @@ impl WalFile {
                 .seek(SeekFrom::End(-(WalData::size_on_disk_from_len(len) as i64)))
                 .await?;
 
-            let data = WalData::read(&mut file)
-                .await?
-                .ok_or(Error::new(ErrorKind::Other, "Invalid WAL file"))?;
+            let data = WalData::read(&mut file).await?.ok_or(Error::InvalidFile)?;
             let write_offset = file.seek(SeekFrom::Current(0)).await?;
 
             let next_idx_to_read = data.ack_idx() + 1;
@@ -307,7 +301,7 @@ impl WalFile {
             trace!("Wal opened: {:?}", wal);
             Ok(wal)
         } else {
-            trace!("Creating new WAL file: {:?}", p.to_str().unwrap());
+            trace!("  Creating...");
             let mut o = OpenOptions::new();
             o.create(true);
             o.read(true);
@@ -333,17 +327,16 @@ impl WalFile {
     pub async fn seek_to(&mut self, next_idx_to_read: u64) -> Result<()> {
         trace!("Seeking to {} in {:?}", next_idx_to_read, self.file);
         self.file.seek(SeekFrom::Start(0)).await?;
-        if let Some(data) = WalData::read(&mut self.file).await? {
-            let read_offset = self.pos().await?;
-            if data.idx() > next_idx_to_read {
+        match WalData::read(&mut self.file).await? {
+            Some(data) if data.idx() > next_idx_to_read => {
                 trace!("First index {} > {}", data.idx(), next_idx_to_read);
                 self.read_offset = 0;
                 self.next_idx_to_read = data.idx();
-                return Ok(());
-            } else if data.idx() == next_idx_to_read {
+            }
+            Some(data) if data.idx() == next_idx_to_read => {
                 // since the currently read data is the data we wanted to seek to
                 // we have to move the read pointer one back
-                let read_offset = read_offset - data.size_on_disk();
+                let read_offset = data.size_on_disk();
                 trace!(
                     "First index {} == {} => read_offset: {}",
                     data.idx(),
@@ -352,44 +345,46 @@ impl WalFile {
                 );
                 self.read_offset = read_offset;
                 self.next_idx_to_read = next_idx_to_read;
-                return Ok(());
             }
-        } else {
-            trace!("No entries found setting read_idx and read_offset to 0");
-            self.read_offset = 0;
-            self.next_idx_to_read = 0;
-            return Ok(());
-        }
-        loop {
-            let read_offset = self.pos().await?;
-            if let Some(data) = WalData::read(&mut self.file).await? {
-                trace!(
-                    "Testing {} > {} @ {}",
-                    data.idx(),
-                    next_idx_to_read,
-                    read_offset
-                );
-                if data.idx() >= next_idx_to_read {
+            Some(_) => loop {
+                let read_offset = self.pos().await?;
+                if let Some(data) = WalData::read(&mut self.file).await? {
+                    trace!(
+                        "Testing {} > {} @ {}",
+                        data.idx(),
+                        next_idx_to_read,
+                        read_offset
+                    );
+                    if data.idx() >= next_idx_to_read {
+                        self.read_offset = read_offset;
+                        self.next_idx_to_read = next_idx_to_read;
+                        break;
+                    }
+                } else {
+                    trace!(
+                        "EOF Reached next read: {} @ {}",
+                        next_idx_to_read,
+                        read_offset
+                    );
                     self.read_offset = read_offset;
                     self.next_idx_to_read = next_idx_to_read;
                     break;
                 }
-            } else {
-                trace!(
-                    "EOF Reached next read: {} @ {}",
-                    next_idx_to_read,
-                    read_offset
-                );
-                self.read_offset = read_offset;
-                self.next_idx_to_read = next_idx_to_read;
-                break;
+            },
+            None => {
+                trace!("No entries found setting read_idx and read_offset to 0");
+                self.read_offset = 0;
+                self.next_idx_to_read = 0;
             }
         }
         Ok(())
     }
 
     async fn pos(&mut self) -> Result<u64> {
-        self.file.seek(SeekFrom::Current(0)).await
+        self.file
+            .seek(SeekFrom::Current(0))
+            .await
+            .map_err(Error::Io)
     }
 
     // Mark up to the specified index as acknowledged
