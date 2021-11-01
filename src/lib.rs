@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod entry;
 mod file;
-use file::WalFile;
+pub use entry::Entry;
+pub use file::WalFile;
 use std::{
     ffi::OsStr,
     io::{Error, ErrorKind},
@@ -42,22 +44,6 @@ use async_std::{
 /// Normalize errors in this crate to std::io::Result<T>
 pub type Result<T> = std::io::Result<T>;
 
-/// Represents a serializable entry in the write-ahead-log
-pub trait Entry {
-    fn serialize(self) -> Vec<u8>;
-    fn deserialize(data: Vec<u8>) -> Self;
-}
-
-impl Entry for Vec<u8> {
-    fn serialize(self) -> Vec<u8> {
-        self
-    }
-
-    fn deserialize(data: Vec<u8>) -> Self {
-        data
-    }
-}
-
 /// The primary struct for the write-ahead log provided in this crate
 pub struct Wal {
     /// The path to an instance of a write-ahead-log
@@ -72,7 +58,8 @@ pub struct Wal {
 
 impl Wal {
     pub async fn revert(&mut self) -> Result<()> {
-        unimplemented!()
+        trace!("Reverting to {}", self.write_file.ack_idx + 1);
+        self.seek_to(self.write_file.ack_idx + 1).await
     }
 
     fn format_file_name(idx: u64) -> String {
@@ -121,15 +108,16 @@ impl Wal {
         Ok(idx)
     }
 
-    /// Pop an existing entry from the write-ahead-log, error if the operation fails
     pub async fn pop<E>(&mut self) -> Result<Option<(u64, E)>>
+    /// Pop an existing entry from the write-ahead-log, error if the operation fails
+    pub async fn pop<E>(&mut self) -> Result<Option<(u64, E::Output)>>
     where
         E: Entry,
     {
         'outer: loop {
             if let Some(read) = self.read_file.as_mut() {
                 trace!("Read file exists: {:?}", read);
-                if let Some(r) = read.pop().await? {
+                if let Some(r) = read.pop::<E>().await? {
                     trace!("  We found an entry: {}", r.0);
                     return Ok(Some(r));
                 }
@@ -151,7 +139,7 @@ impl Wal {
             break;
         }
         self.read_file = None;
-        self.write_file.pop().await
+        self.write_file.pop::<E>().await
     }
 
     /// Open a write-ahead-log given a path to a directory containing the write-ahead-log
@@ -181,40 +169,21 @@ impl Wal {
             }
         }
         files.sort();
-        if let Some(((first_idx, first_file), (last_idx, last_file))) =
-            files.first().zip(files.last())
-        {
-            trace!("Opening files between: {} and {}", first_idx, last_idx);
+
+        if let Some((_, last_file)) = files.last() {
             let write_file = WalFile::open(&last_file).await?;
             trace!("Opening WRITE file: {:?}", write_file);
-            if first_idx == last_idx {
-                Ok(Self {
-                    dir,
-                    files: files,
-                    read_file: None,
-                    write_file,
-                    chunk_size,
-                    max_chunks,
-                })
-            } else {
-                let read_file = {
-                    let mut read_file = WalFile::open(&first_file).await?;
-                    read_file.ack_idx = write_file.ack_idx;
-                    read_file.ack_written = write_file.ack_written;
-                    read_file.seek_to(write_file.next_idx_to_read).await?;
-                    trace!("Opening READ file: {:?}", read_file);
-                    Some(read_file)
-                };
-
-                Ok(Self {
-                    dir,
-                    files: files,
-                    read_file,
-                    write_file,
-                    chunk_size,
-                    max_chunks,
-                })
-            }
+            let next_idx_to_read = write_file.next_idx_to_read;
+            let mut wal = Self {
+                dir,
+                files: files,
+                read_file: None,
+                write_file,
+                chunk_size,
+                max_chunks,
+            };
+            wal.seek_to(next_idx_to_read).await?;
+            Ok(wal)
         } else {
             let mut file = dir.clone();
             file.push(Self::format_file_name(0));
@@ -231,7 +200,38 @@ impl Wal {
         }
     }
 
-    /// Acknowledge entries up to a specified index in the write-ahead-log
+    async fn seek_to(&mut self, idx: u64) -> Result<()> {
+        trace!("Seeking to: {} in {:?}", idx, self.files);
+
+        // Check if we can seek in the write file
+        if let Some((write_idx, _)) = self.files.last() {
+            if idx >= *write_idx {
+                trace!("Seeking in write file: {:?}", self.write_file);
+                // we clear the read file and seek to the desired index on the write file
+                self.read_file = None;
+                return self.write_file.seek_to(idx).await;
+            }
+        };
+
+        let mut i = self.files.iter().rev().skip_while(|(i, _)| {
+            trace!("  testing if {} > {} == {}", *i, idx, *i > idx);
+            *i > idx
+        });
+
+        if let Some((_, f)) = i.next() {
+            trace!("Seek picked: {} {:?}", idx, f);
+            // We open a new read file and seek to it
+            let mut read_file = WalFile::open(f).await?;
+            trace!("Seeking in write read file: {:?}", read_file);
+            read_file.seek_to(idx).await?;
+            self.read_file = Some(read_file);
+            Ok(())
+        } else {
+            Err(Error::new(ErrorKind::Other, "invalid seek index"))
+        }
+    }
+
+    /// Acknowledge entries up to a specified index in the write-ahead-log  
     pub async fn ack(&mut self, id: u64) -> Result<()> {
         trace!("ACKing {}", id);
         self.write_file.ack(id);
@@ -287,22 +287,23 @@ mod test {
         let path = temp_dir.path().to_path_buf();
 
         {
-            dbg!(0);
             let mut w = Wal::open(&path, 50, 10).await?;
             assert_eq!(w.push(b"1".to_vec()).await?, 0);
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((0, b"1".to_vec())));
-            dbg!();
             w.ack(0).await?;
-            dbg!();
             assert_eq!(w.push(b"22".to_vec()).await?, 1);
 
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"22".to_vec())));
             w.close().await?;
         }
         {
-            dbg!(1);
             let mut w = Wal::open(&path, 50, 10).await?;
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"22".to_vec())));
+
+            w.revert().await?;
+
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"22".to_vec())));
+
             w.ack(1).await?;
 
             assert_eq!(w.push(b"333".to_vec()).await?, 2);
@@ -311,7 +312,6 @@ mod test {
 
             w.close().await?;
         }
-        dbg!(2);
         let mut w = Wal::open(&path, 50, 10).await?;
         assert_eq!(w.pop::<Vec<u8>>().await?, None);
         temp_dir.close()?;
