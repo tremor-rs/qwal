@@ -15,30 +15,30 @@
 
 ---
 
-Pronouced `Quál` - from the german wordrd for `agony` - because it is.
+Pronouced `Quál` - from the german word for `agony` - because it is.
 
 
 
 ## Operations
 
-The basic concept is simple, qual supports exactly 4 opperations:
+The basic concept is simple, `qwal` supports exactly 4 operations:
 
 ### `push` 
 
-Appends a new entry to the end of the queue, returns it's index.
+Appends a new entry to the end of the queue, returning its index.
 
 ### `pop`
 
-Reads the next index from the queue, returns the entry and it's index or none if the queue
-is fully consumed.
+Reads the next index from the queue, returning the previous entry and its index if
+one exists, or none if the queue is empty.
 
 ### `ack`
 
-Acknowledges the processing of a entry, this means that in the entry can be removed.
+Acknowledges processing of an entry, confirming it is enqueued.
 
 ### `revert`
 
-Reverts back to the last acknowledged entry - will anything since then.
+Reverts back to the last acknowledged entry in the queue - will clear/drain any entry since that point.
 
 
 ## Performance Characteristics
@@ -55,20 +55,20 @@ Reads the data from disk. Also a `seek` is performed if a `push` since the alst 
 ### `ack`
 
 No disk operations are performed, `ack`'s are persisted either during a `push` operation or
-as part of the shutdown.
+as part of the shutdown sequence.
 
 ## Operations
 
-`qwal` provides all limits as soft limits, meaning they are considered reached once an operation
-exceeded them not before.
+`qwal` provides all limits as soft limits, meaning they are considered reached after an operation
+has exceeded them, and not before.
 
 ### `chunk_size`
 
-To allow easier reclemation of space the WAL is stored in multiple chunks. The chunk size
-defines the limit. A chunk is considered full once a `push` made it **exceed** the `chunk_size`
+To allow easier reclamation of space the WAL is stored in multiple chunks. The chunk size
+defines the limit. A chunk is considered full once a `push` makes it **exceed** the `chunk_size`
 
 ### `max_chunks`
 
-The soft limit of of chunks that can be open at the same time. The WAL is considered full when
-`max_chunks` + 1 would need to be created
+The soft limit of of chunks that can be active and open at the same time. The WAL is considered full when
+`max_chunks` + 1 would need to be created.
 
