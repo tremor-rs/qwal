@@ -326,7 +326,15 @@ impl WalFile {
                 self.next_idx_to_read = data.idx();
                 return Ok(());
             } else if data.idx() == next_idx_to_read {
-                trace!("First index {} == {}", data.idx(), next_idx_to_read);
+                // since the currently read data is the data we wanted to seek to
+                // we have to move the read pointer one back
+                let read_offset = read_offset - data.size_on_disk();
+                trace!(
+                    "First index {} == {} => read_offset: {}",
+                    data.idx(),
+                    next_idx_to_read,
+                    read_offset
+                );
                 self.read_offset = read_offset;
                 self.next_idx_to_read = next_idx_to_read;
                 return Ok(());
