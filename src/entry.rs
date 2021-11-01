@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// Represents a serializable entry in the write-ahead-log
 pub trait Entry {
     type Output;
     fn serialize(self) -> Vec<u8>;
