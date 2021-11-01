@@ -50,10 +50,7 @@ enum WalData {
         data: Vec<u8>,
     },
     /// Entry is an acknowledgement record
-    Ack {
-        idx: u64,
-        ack_idx: u64,
-    },
+    Ack { idx: u64, ack_idx: u64 },
 }
 
 impl WalData {
@@ -189,7 +186,6 @@ pub(crate) struct WalFile {
 }
 
 impl WalFile {
-
     /// Persists an acknowledgement at the end of the data file at the after the last committed write operation
     pub(crate) async fn preserve_ack(&mut self) -> Result<()> {
         trace!("Appending ack index {} to {:?}", self.ack_idx, self.file);
