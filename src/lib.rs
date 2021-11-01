@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod entry;
 mod file;
-use file::WalFile;
+pub use entry::Entry;
+pub use file::WalFile;
 use std::{
     ffi::OsStr,
     io::{Error, ErrorKind},
@@ -40,21 +42,6 @@ use async_std::{
 };
 
 pub type Result<T> = std::io::Result<T>;
-
-pub trait Entry {
-    fn serialize(self) -> Vec<u8>;
-    fn deserialize(data: Vec<u8>) -> Self;
-}
-
-impl Entry for Vec<u8> {
-    fn serialize(self) -> Vec<u8> {
-        self
-    }
-
-    fn deserialize(data: Vec<u8>) -> Self {
-        data
-    }
-}
 
 pub struct Wal {
     dir: PathBuf,
@@ -115,14 +102,14 @@ impl Wal {
         Ok(idx)
     }
 
-    pub async fn pop<E>(&mut self) -> Result<Option<(u64, E)>>
+    pub async fn pop<E>(&mut self) -> Result<Option<(u64, E::Output)>>
     where
         E: Entry,
     {
         'outer: loop {
             if let Some(read) = self.read_file.as_mut() {
                 trace!("Read file exists: {:?}", read);
-                if let Some(r) = read.pop().await? {
+                if let Some(r) = read.pop::<E>().await? {
                     trace!("  We found an entry: {}", r.0);
                     return Ok(Some(r));
                 }
@@ -144,7 +131,7 @@ impl Wal {
             break;
         }
         self.read_file = None;
-        self.write_file.pop().await
+        self.write_file.pop::<E>().await
     }
 
     pub async fn open<P>(path: P, chunk_size: u64, max_chunks: usize) -> Result<Self>
@@ -300,7 +287,6 @@ mod test {
             w.close().await?;
         }
         {
-            dbg!(1);
             let mut w = Wal::open(&path, 50, 10).await?;
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"22".to_vec())));
 
@@ -316,7 +302,6 @@ mod test {
 
             w.close().await?;
         }
-        dbg!(2);
         let mut w = Wal::open(&path, 50, 10).await?;
         assert_eq!(w.pop::<Vec<u8>>().await?, None);
         temp_dir.close()?;
