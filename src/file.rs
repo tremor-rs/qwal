@@ -50,24 +50,32 @@ enum WalData {
     Ack { idx: u64, ack_idx: u64 },
 }
 
+//
+//  format:
+
 impl WalData {
+    const OFFSET_LEN: usize = 0;
+    const OFFSET_IDX: usize = Self::OFFSET_LEN + size_of::<u64>();
+    const OFFSET_ACK: usize = Self::OFFSET_IDX + size_of::<u64>();
+    const OFFSET_DATA: usize = Self::OFFSET_ACK + size_of::<u64>();
+    const OFFSET_TAILING_LEN: usize = Self::OFFSET_ACK + size_of::<u64>();
+
     async fn read(f: &mut File) -> Result<Option<Self>> {
-        let mut buf = vec![0u8; 8];
+        let mut buf = vec![0u8; size_of::<u64>() * 3];
 
         // read size
         if f.read_exact(&mut buf).await.is_err() {
             return Ok(None);
         }
-        let len = BigEndian::read_u64(&buf);
+        let len = BigEndian::read_u64(&buf[Self::OFFSET_LEN..]);
 
         // read id
-        f.read_exact(&mut buf).await?;
-        let idx = BigEndian::read_u64(&buf);
+        let idx = BigEndian::read_u64(&buf[Self::OFFSET_IDX..]);
         // read ack_id
-        f.read_exact(&mut buf).await?;
-        let ack_idx = BigEndian::read_u64(&buf);
+        let ack_idx = BigEndian::read_u64(&buf[Self::OFFSET_ACK..]);
 
         if len == u64::MAX {
+            let mut buf = vec![0u8; size_of::<u64>()];
             // THIS is a ack token
             f.read_exact(&mut buf).await?;
             let len2 = BigEndian::read_u64(&buf);
@@ -83,6 +91,7 @@ impl WalData {
             unsafe { data.set_len(len as usize) };
             f.read_exact(&mut data).await?;
 
+            let mut buf = vec![0u8; size_of::<u64>()];
             f.read_exact(&mut buf).await?;
             let len2 = BigEndian::read_u64(&buf);
             if len2 != len {
@@ -117,19 +126,18 @@ impl WalData {
             WalData::Data { idx, ack_idx, data } => {
                 // id + ack_id + len + len (tailing len)
                 let len = data.len();
-                BigEndian::write_u64(&mut buf[0..], len as u64); //len
-                BigEndian::write_u64(&mut buf[8..], *idx); // idx
-                BigEndian::write_u64(&mut buf[16..], *ack_idx); // ack
-                buf[24..(size_on_disk - 8)].clone_from_slice(data); // data
-                BigEndian::write_u64(&mut buf[(24 + len)..], len as u64); // len2
+                BigEndian::write_u64(&mut buf[Self::OFFSET_LEN..], len as u64);
+                BigEndian::write_u64(&mut buf[Self::OFFSET_IDX..], *idx);
+                BigEndian::write_u64(&mut buf[Self::OFFSET_ACK..], *ack_idx);
+                buf[Self::OFFSET_DATA..(Self::OFFSET_DATA + len)].clone_from_slice(data);
+                BigEndian::write_u64(&mut buf[(Self::OFFSET_DATA + len)..], len as u64); // len2
                 w.write_all(&buf).await?;
             }
             WalData::Ack { ack_idx, idx } => {
-                BigEndian::write_u64(&mut buf[0..], u64::MAX); // len
-                BigEndian::write_u64(&mut buf[8..], *idx); // idx
-                BigEndian::write_u64(&mut buf[16..], *ack_idx); // ack
-                BigEndian::write_u64(&mut buf[24..], 0); // len 2
-                BigEndian::write_u64(&mut buf[..], 0);
+                BigEndian::write_u64(&mut buf[Self::OFFSET_LEN..], u64::MAX);
+                BigEndian::write_u64(&mut buf[Self::OFFSET_IDX..], *idx);
+                BigEndian::write_u64(&mut buf[Self::OFFSET_ACK..], *ack_idx);
+                BigEndian::write_u64(&mut buf[Self::OFFSET_TAILING_LEN..], 0);
                 w.write_all(&buf).await?;
             }
         }
@@ -163,7 +171,7 @@ pub struct WalFile {
     /// The next index to be read
     pub(crate) next_idx_to_read: u64,
     /// The read offset
-    pub(crate) read_offset: u64,
+    pub(crate) read_pointer: u64,
     /// The index for acknowledged entries
     pub(crate) ack_idx: u64,
     /// The most recent acknowledgement offset
@@ -224,10 +232,10 @@ impl WalFile {
     where
         E: Entry,
     {
-        self.file.seek(SeekFrom::Start(self.read_offset)).await?;
+        self.file.seek(SeekFrom::Start(self.read_pointer)).await?;
         loop {
             let data = WalData::read(&mut self.file).await?;
-            self.read_offset += data.as_ref().map(WalData::size_on_disk).unwrap_or_default();
+            self.read_pointer += data.as_ref().map(WalData::size_on_disk).unwrap_or_default();
             match data {
                 None => return Ok(None),
                 Some(WalData::Data { idx, data, .. }) => {
@@ -290,7 +298,7 @@ impl WalFile {
                 next_idx_to_write: data.idx() + 1,
                 write_offset,
                 next_idx_to_read,
-                read_offset,
+                read_pointer: read_offset,
                 ack_idx: data.ack_idx(),
                 ack_written: data.ack_idx(),
             };
@@ -308,10 +316,10 @@ impl WalFile {
             o.write(true);
             Ok(WalFile {
                 file: o.open(path).await?,
-                next_idx_to_write: 0,
+                next_idx_to_write: 1,
                 write_offset: 0,
-                next_idx_to_read: 0,
-                read_offset: 0,
+                next_idx_to_read: 1,
+                read_pointer: 0,
                 ack_idx: 0,
                 ack_written: 0,
             })
@@ -328,22 +336,25 @@ impl WalFile {
         trace!("Seeking to {} in {:?}", next_idx_to_read, self.file);
         self.file.seek(SeekFrom::Start(0)).await?;
         match WalData::read(&mut self.file).await? {
+            // This would mean we want to seek infront of the file, in this case
+            // just stick with the first element
             Some(data) if data.idx() > next_idx_to_read => {
                 trace!("First index {} > {}", data.idx(), next_idx_to_read);
-                self.read_offset = 0;
+                self.read_pointer = 0;
                 self.next_idx_to_read = data.idx();
             }
+            // This is the correct element, we set the offset to zero and read from here on
             Some(data) if data.idx() == next_idx_to_read => {
                 // since the currently read data is the data we wanted to seek to
                 // we have to move the read pointer one back
-                let read_offset = data.size_on_disk();
+                let read_offset = 0;
                 trace!(
                     "First index {} == {} => read_offset: {}",
                     data.idx(),
                     next_idx_to_read,
                     read_offset
                 );
-                self.read_offset = read_offset;
+                self.read_pointer = read_offset;
                 self.next_idx_to_read = next_idx_to_read;
             }
             Some(_) => loop {
@@ -356,7 +367,7 @@ impl WalFile {
                         read_offset
                     );
                     if data.idx() >= next_idx_to_read {
-                        self.read_offset = read_offset;
+                        self.read_pointer = read_offset;
                         self.next_idx_to_read = next_idx_to_read;
                         break;
                     }
@@ -366,14 +377,14 @@ impl WalFile {
                         next_idx_to_read,
                         read_offset
                     );
-                    self.read_offset = read_offset;
+                    self.read_pointer = read_offset;
                     self.next_idx_to_read = next_idx_to_read;
                     break;
                 }
             },
             None => {
                 trace!("No entries found setting read_idx and read_offset to 0");
-                self.read_offset = 0;
+                self.read_pointer = 0;
                 self.next_idx_to_read = 0;
             }
         }
@@ -407,25 +418,34 @@ mod test {
         path.push("wal.file");
 
         {
+            dbg!(1);
             let mut w = WalFile::open(&path).await?;
 
-            assert_eq!(w.push(b"snot".to_vec()).await?, 0);
-            assert_eq!(w.pop::<Vec<u8>>().await?, Some((0, b"snot".to_vec())));
+            assert_eq!(w.push(b"1".to_vec()).await?, 1);
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"1".to_vec())));
 
-            w.ack(0);
-
-            assert_eq!(w.push(b"badger".to_vec()).await?, 1);
-            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"badger".to_vec())));
             w.close().await?;
         }
         {
+            dbg!(2);
             let mut w = WalFile::open(&path).await?;
-            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"badger".to_vec())));
+
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"1".to_vec())));
             w.ack(1);
 
-            assert_eq!(w.push(b"boo".to_vec()).await?, 2);
-            assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"boo".to_vec())));
+            assert_eq!(w.push(b"22".to_vec()).await?, 2);
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"22".to_vec())));
+            w.close().await?;
+        }
+        {
+            dbg!(3);
+            let mut w = WalFile::open(&path).await?;
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"22".to_vec())));
             w.ack(2);
+
+            assert_eq!(w.push(b"33".to_vec()).await?, 3);
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((3, b"33".to_vec())));
+            w.ack(3);
 
             w.close().await?;
         }
