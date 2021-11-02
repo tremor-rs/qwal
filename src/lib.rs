@@ -426,28 +426,39 @@ mod test {
         let path = temp_dir.path().to_path_buf();
 
         {
+            dbg!(1);
             let mut w = Wal::open(&path, 50, 10).await?;
-            assert_eq!(w.push(b"1".to_vec()).await?, 0);
-            assert_eq!(w.pop::<Vec<u8>>().await?, Some((0, b"1".to_vec())));
-            w.ack(0).await?;
-            assert_eq!(w.push(b"22".to_vec()).await?, 1);
 
-            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"22".to_vec())));
+            assert_eq!(w.push(b"1".to_vec()).await?, 1);
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"1".to_vec())));
+
             w.close().await?;
         }
         {
+            dbg!(2);
             let mut w = Wal::open(&path, 50, 10).await?;
-            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"22".to_vec())));
+
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"1".to_vec())));
+            w.ack(1).await?;
+
+            assert_eq!(w.push(b"22".to_vec()).await?, 2);
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"22".to_vec())));
+            w.close().await?;
+        }
+        {
+            dbg!(3);
+            let mut w = Wal::open(&path, 50, 10).await?;
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"22".to_vec())));
 
             w.revert().await?;
 
-            assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"22".to_vec())));
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"22".to_vec())));
 
-            w.ack(1).await?;
-
-            assert_eq!(w.push(b"333".to_vec()).await?, 2);
-            assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"333".to_vec())));
             w.ack(2).await?;
+
+            assert_eq!(w.push(b"333".to_vec()).await?, 3);
+            assert_eq!(w.pop::<Vec<u8>>().await?, Some((3, b"333".to_vec())));
+            w.ack(3).await?;
 
             w.close().await?;
         }
