@@ -353,7 +353,13 @@ impl Wal {
     /// messages increases as items acknowledged between the last `push` and dropping the `Wal`
     /// will be read again.
     pub async fn close(mut self) -> Result<()> {
-        self.write_file.close().await?;
+        self.preserve_ack().await
+    }
+
+    /// Persists an ack, this is usually not needed as `push` will do the same. Use this with
+    /// caution as it will have a performanc impact.
+    pub async fn preserve_ack(&mut self) -> Result<()> {
+        self.write_file.preserve_ack().await?;
         if let Some(f) = self.read_file.take() {
             f.close().await?;
         }
