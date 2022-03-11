@@ -12,31 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::convert::Infallible;
+
 /// Represents a serializable entry in the write-ahead-log
 pub trait Entry {
     type Output;
-    fn serialize(self) -> Vec<u8>;
-    fn deserialize(data: Vec<u8>) -> Self::Output;
+    type Error: std::error::Error;
+    fn serialize(self) -> Result<Vec<u8>, Self::Error>;
+    fn deserialize(data: Vec<u8>) -> Result<Self::Output, Self::Error>;
 }
 
 impl Entry for Vec<u8> {
     type Output = Vec<u8>;
-    fn serialize(self) -> Vec<u8> {
-        self
+    type Error = Infallible;
+    fn serialize(self) -> Result<Vec<u8>, Self::Error> {
+        Ok(self)
     }
 
-    fn deserialize(data: Vec<u8>) -> Self::Output {
-        data
+    fn deserialize(data: Vec<u8>) -> Result<Self::Output, Self::Error> {
+        Ok(data)
     }
 }
 
 impl Entry for &[u8] {
     type Output = Vec<u8>;
-    fn serialize(self) -> Vec<u8> {
-        self.to_vec()
+    type Error = Infallible;
+    fn serialize(self) -> Result<Vec<u8>, Self::Error> {
+        Ok(self.to_vec())
     }
 
-    fn deserialize(data: Vec<u8>) -> Self::Output {
-        data
+    fn deserialize(data: Vec<u8>) -> Result<Self::Output, Self::Error> {
+        Ok(data)
     }
 }

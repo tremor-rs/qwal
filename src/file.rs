@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::match_error;
+
 use super::{Entry, Error, Result};
 
 use std::{io::SeekFrom, mem::size_of};
@@ -207,7 +209,7 @@ impl WalFile {
     }
 
     /// Push an entry into the write-ahead-log data file
-    pub async fn push<E>(&mut self, data: E) -> Result<u64>
+    pub async fn push<E>(&mut self, data: E) -> std::result::Result<u64, Error<E::Error>>
     where
         E: Entry,
     {
@@ -219,28 +221,28 @@ impl WalFile {
         let data = WalData::Data {
             idx,
             ack_idx,
-            data: data.serialize(),
+            data: data.serialize().map_err(Error::Entry)?,
         };
         self.file.seek(SeekFrom::Start(self.write_offset)).await?;
-        self.write_offset += data.write(&mut self.file).await?;
-        self.sync().await?;
+        self.write_offset += data.write(&mut self.file).await.map_err(match_error)?;
+        self.sync().await.map_err(match_error)?;
         Ok(idx)
     }
 
     /// Pop an entry from the write-ahead-log data file
-    pub async fn pop<E>(&mut self) -> Result<Option<(u64, E::Output)>>
+    pub async fn pop<E>(&mut self) -> std::result::Result<Option<(u64, E::Output)>, Error<E::Error>>
     where
         E: Entry,
     {
         self.file.seek(SeekFrom::Start(self.read_pointer)).await?;
         loop {
-            let data = WalData::read(&mut self.file).await?;
+            let data = WalData::read(&mut self.file).await.map_err(match_error)?;
             self.read_pointer += data.as_ref().map(WalData::size_on_disk).unwrap_or_default();
             match data {
                 None => return Ok(None),
                 Some(WalData::Data { idx, data, .. }) => {
                     self.next_idx_to_read = idx + 1;
-                    return Ok(Some((idx, E::deserialize(data))));
+                    return Ok(Some((idx, E::deserialize(data).map_err(Error::Entry)?)));
                 }
                 Some(WalData::Ack { .. }) => {}
             }

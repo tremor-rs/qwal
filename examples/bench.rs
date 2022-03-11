@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use byteorder::{BigEndian, ByteOrder};
 use qwal::{Result, Wal};
 use std::time;
 

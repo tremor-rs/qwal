@@ -21,7 +21,7 @@ use async_std::{
 };
 pub use entry::Entry;
 pub use file::WalFile;
-use std::{ffi::OsStr, fmt::Display, io};
+use std::{convert::Infallible, ffi::OsStr, fmt::Display, io};
 
 #[cfg(test)]
 macro_rules! trace {
@@ -39,7 +39,7 @@ macro_rules! trace {
 
 #[derive(Debug)]
 /// Error type
-pub enum Error {
+pub enum Error<EE: std::error::Error> {
     /// System IO error
     Io(io::Error),
     /// The provided Path is not a directory
@@ -58,9 +58,13 @@ pub enum Error {
     InvalidAckId,
     /// An invalid seek index has been given, it has to be after the last `ack` and before `write`
     InvalidIndex,
+    /// Incompatible entry error
+    IncompatibleError,
+    /// Entry Error
+    Entry(EE),
 }
 
-impl Display for Error {
+impl<EE: std::error::Error> Display for Error<EE> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Error::Io(e) => e.fmt(f),
@@ -72,18 +76,39 @@ impl Display for Error {
             Error::SizeExceeded => write!(f, "WAL Size Exceeded"),
             Error::InvalidAckId => write!(f, "Invalid Ack Index"),
             Error::InvalidIndex => write!(f, "Invalid Index"),
+            Error::IncompatibleError => write!(f, "Incompatible error"),
+            Error::Entry(e) => write!(f, "Entry Error: {e}"),
         }
     }
 }
-impl std::error::Error for Error {}
+impl<EE: std::error::Error> std::error::Error for Error<EE> {}
 
-impl From<io::Error> for Error {
+impl<EE: std::error::Error> From<io::Error> for Error<EE> {
     fn from(e: io::Error) -> Self {
         Error::Io(e)
     }
 }
+
+pub(crate) fn match_error<EE1: std::error::Error, EE2: std::error::Error>(
+    e: Error<EE1>,
+) -> Error<EE2> {
+    match e {
+        Error::Io(e) => Error::Io(e),
+        Error::NotADirectory => Error::NotADirectory,
+        Error::NotAFile => Error::NotAFile,
+        Error::InvalidAck => Error::InvalidAck,
+        Error::InvalidEntry => Error::InvalidEntry,
+        Error::InvalidFile => Error::InvalidFile,
+        Error::SizeExceeded => Error::SizeExceeded,
+        Error::InvalidAckId => Error::InvalidAckId,
+        Error::InvalidIndex => Error::InvalidIndex,
+        Error::IncompatibleError => Error::IncompatibleError,
+        Error::Entry(_) => Error::IncompatibleError,
+    }
+}
+
 /// Normalize errors in this crate to std::io::Result<T>
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, Error<Infallible>>;
 
 /// A sequential Write-Ahead Log that iterates over multiple files and acts as a queue.
 ///
@@ -209,7 +234,7 @@ impl Wal {
     ///
     /// ## Errors
     /// On IO Errors or if the entry is exceed the WAL's capacity
-    pub async fn push<E>(&mut self, data: E) -> Result<u64>
+    pub async fn push<E>(&mut self, data: E) -> std::result::Result<u64, Error<E::Error>>
     where
         E: Entry,
     {
@@ -227,14 +252,14 @@ impl Wal {
             path.push(Self::format_file_name(self.write_file.next_idx_to_write));
             self.files
                 .push((self.write_file.next_idx_to_write, path.clone()));
-            let mut next_wal = WalFile::open(path).await?;
+            let mut next_wal = WalFile::open(path).await.map_err(match_error)?;
             next_wal.next_idx_to_read = self.write_file.next_idx_to_read;
             next_wal.next_idx_to_write = self.write_file.next_idx_to_write;
             next_wal.ack_idx = self.write_file.ack_idx;
             next_wal.ack_written = self.write_file.ack_written;
             std::mem::swap(&mut next_wal, &mut self.write_file);
 
-            self.write_file.preserve_ack().await?;
+            self.write_file.preserve_ack().await.map_err(match_error)?;
             if self.read_file.is_none() {
                 self.read_file = Some(next_wal)
             }
@@ -253,7 +278,7 @@ impl Wal {
         'outer: loop {
             if let Some(read) = self.read_file.as_mut() {
                 trace!("Read file exists: {:?}", read);
-                if let Some(r) = read.pop::<E>().await? {
+                if let Some(r) = read.pop::<E>().await.map_err(match_error)? {
                     trace!("  We found an entry: {}", r.0);
                     return Ok(Some(r));
                 }
@@ -275,7 +300,7 @@ impl Wal {
             break;
         }
         self.read_file = None;
-        self.write_file.pop::<E>().await
+        self.write_file.pop::<E>().await.map_err(match_error)
     }
 
     /// Acknowledges an entry as completely processed allowing it to be reclaimed.
