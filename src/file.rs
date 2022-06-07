@@ -81,7 +81,7 @@ impl WalData {
             // THIS is a ack token
             f.read_exact(&mut buf).await?;
             let len2 = BigEndian::read_u64(&buf);
-            if len2 != 0 {
+            if dbg!(len2) != 0 {
                 Err(Error::InvalidAck)
             } else {
                 Ok(Some(Self::Ack { ack_idx, idx }))
@@ -109,7 +109,7 @@ impl WalData {
         if len == u64::MAX {
             len64 * 4
         } else {
-            len + len64 * 4
+            len + (len64 * 4)
         }
     }
 
@@ -237,7 +237,9 @@ impl WalFile {
         self.file.seek(SeekFrom::Start(self.read_pointer)).await?;
         loop {
             let data = WalData::read(&mut self.file).await.map_err(match_error)?;
-            self.read_pointer += data.as_ref().map(WalData::size_on_disk).unwrap_or_default();
+            let advance_by = data.as_ref().map(WalData::size_on_disk).unwrap_or_default();
+            trace!("Advance read pointer by: {}", advance_by);
+            self.read_pointer += advance_by;
             match data {
                 None => return Ok(None),
                 Some(WalData::Data { idx, data, .. }) => {

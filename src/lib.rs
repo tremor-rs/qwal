@@ -299,6 +299,10 @@ impl Wal {
             }
             break;
         }
+        trace!("read_file => None");
+        if let Some(_rf) = &self.read_file {
+            trace!("read_file.next_idx: {}", _rf.next_idx_to_read);
+        }
         self.read_file = None;
         self.write_file.pop::<E>().await.map_err(match_error)
     }
@@ -321,6 +325,11 @@ impl Wal {
         trace!("ACKing {}", id);
 
         if self.read_idx() <= id || self.write_file.ack_idx > id {
+            trace!(
+                "read_idx: {}, write_file.ack_idx: {}",
+                self.read_idx(),
+                self.write_file.ack_idx
+            );
             return Err(Error::InvalidAckId);
         }
 
@@ -490,6 +499,31 @@ mod test {
         let mut w = Wal::open(&path, 50, 10).await?;
         assert_eq!(w.pop::<Vec<u8>>().await?, None);
         temp_dir.close()?;
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn ack() -> Result<()> {
+        let temp_dir = TempDirBuilder::new().prefix("tremor-wal").tempdir()?;
+
+        let path = temp_dir.path().to_path_buf();
+        let mut w = Wal::open(&path, 128, 10).await?;
+        assert_eq!(w.pop::<Vec<u8>>().await?, None);
+
+        let data = [b'A'; 721];
+        assert_eq!(1, w.push(data.to_vec()).await?);
+        assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, data.to_vec())));
+        w.ack(1).await?;
+
+        assert_eq!(2, w.push(data.to_vec()).await?);
+        // double-pop
+        assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, data.to_vec())));
+        assert_eq!(w.pop::<Vec<u8>>().await?, None);
+        //w.ack(2).await?;
+
+        assert_eq!(3, w.push(data.to_vec()).await?);
+        assert_eq!(w.pop::<Vec<u8>>().await?, Some((3, data.to_vec())));
+        w.ack(3).await?;
         Ok(())
     }
 }
