@@ -55,7 +55,11 @@ pub enum Error<EE: std::error::Error> {
     /// The WAL is exceeding it's limits and can not be written to
     SizeExceeded,
     /// Invalid ACK id is provided, it has to be between the last `ack` and the current `read`
-    InvalidAckId,
+    InvalidAckId {
+        ack_id: u64,
+        read_index: u64,
+        write_file_ack: u64,
+    },
     /// An invalid seek index has been given, it has to be after the last `ack` and before `write`
     InvalidIndex,
     /// Incompatible entry error
@@ -74,7 +78,7 @@ impl<EE: std::error::Error> Display for Error<EE> {
             Error::InvalidEntry => write!(f, "Invalid WAL entry (Entry)"),
             Error::InvalidFile => write!(f, "Invalid WAL File"),
             Error::SizeExceeded => write!(f, "WAL Size Exceeded"),
-            Error::InvalidAckId => write!(f, "Invalid Ack Index"),
+            Error::InvalidAckId{ ack_id, read_index, write_file_ack } => write!(f, "Invalid Ack Index {ack_id}, current read index: {read_index} write_file_ack: {write_file_ack}"),
             Error::InvalidIndex => write!(f, "Invalid Index"),
             Error::IncompatibleError => write!(f, "Incompatible error"),
             Error::Entry(e) => write!(f, "Entry Error: {e}"),
@@ -100,7 +104,15 @@ pub(crate) fn match_error<EE1: std::error::Error, EE2: std::error::Error>(
         Error::InvalidEntry => Error::InvalidEntry,
         Error::InvalidFile => Error::InvalidFile,
         Error::SizeExceeded => Error::SizeExceeded,
-        Error::InvalidAckId => Error::InvalidAckId,
+        Error::InvalidAckId {
+            ack_id,
+            read_index,
+            write_file_ack,
+        } => Error::InvalidAckId {
+            ack_id,
+            read_index,
+            write_file_ack,
+        },
         Error::InvalidIndex => Error::InvalidIndex,
         Error::IncompatibleError => Error::IncompatibleError,
         Error::Entry(_) => Error::IncompatibleError,
@@ -300,10 +312,13 @@ impl Wal {
             break;
         }
         trace!("read_file => None");
-        if let Some(_rf) = &self.read_file {
-            trace!("read_file.next_idx: {}", _rf.next_idx_to_read);
+        if let Some(rf) = self.read_file.take() {
+            dbg!(&rf);
+            trace!("read_file.next_idx: {}", rf.next_idx_to_read);
+            self.write_file.next_idx_to_read = rf.next_idx_to_read;
         }
-        self.read_file = None;
+
+        dbg!(&self.write_file);
         self.write_file.pop::<E>().await.map_err(match_error)
     }
 
@@ -330,7 +345,11 @@ impl Wal {
                 self.read_idx(),
                 self.write_file.ack_idx
             );
-            return Err(Error::InvalidAckId);
+            return Err(Error::InvalidAckId {
+                ack_id: id,
+                read_index: self.read_idx(),
+                write_file_ack: self.write_file.ack_idx,
+            });
         }
 
         self.write_file.ack(id);
@@ -440,9 +459,9 @@ impl Wal {
     /// Current read index
     fn read_idx(&self) -> u64 {
         if let Some(read_file) = &self.read_file {
-            read_file.next_idx_to_read
+            dbg!(read_file.next_idx_to_read)
         } else {
-            self.write_file.next_idx_to_read
+            dbg!(self.write_file.next_idx_to_read)
         }
     }
 }
@@ -519,7 +538,7 @@ mod test {
         // double-pop
         assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, data.to_vec())));
         assert_eq!(w.pop::<Vec<u8>>().await?, None);
-        //w.ack(2).await?;
+        w.ack(2).await?;
 
         assert_eq!(3, w.push(data.to_vec()).await?);
         assert_eq!(w.pop::<Vec<u8>>().await?, Some((3, data.to_vec())));

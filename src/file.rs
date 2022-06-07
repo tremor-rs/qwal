@@ -63,6 +63,7 @@ impl WalData {
     const OFFSET_TAILING_LEN: usize = Self::OFFSET_ACK + size_of::<u64>();
 
     async fn read(f: &mut File) -> Result<Option<Self>> {
+        dbg!(&f);
         let mut buf = vec![0u8; size_of::<u64>() * 3];
 
         // read size
@@ -70,12 +71,15 @@ impl WalData {
             return Ok(None);
         }
         let len = BigEndian::read_u64(&buf[Self::OFFSET_LEN..]);
+        println!("{len:#X}");
+        dbg!(len);
 
         // read id
         let idx = BigEndian::read_u64(&buf[Self::OFFSET_IDX..]);
+        dbg!(idx);
         // read ack_id
         let ack_idx = BigEndian::read_u64(&buf[Self::OFFSET_ACK..]);
-
+        dbg!(ack_idx);
         if len == u64::MAX {
             let mut buf = vec![0u8; size_of::<u64>()];
             // THIS is a ack token
@@ -262,8 +266,10 @@ impl WalFile {
         o.write(false);
         o.read(true);
         let mut file = o.open(&path).await?;
-        while let Ok(Some(data)) = WalData::read(&mut file).await {
-            println!("{:?}", data);
+        let mut offset = 0;
+        while let Some(data) = WalData::read(&mut file).await? {
+            println!("{offset:9}: {:?}", data);
+            offset = file.seek(SeekFrom::Current(0)).await?
         }
         Ok(())
     }
