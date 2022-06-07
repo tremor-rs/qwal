@@ -238,6 +238,7 @@ impl WalFile {
     where
         E: Entry,
     {
+        dbg!(&self.read_pointer);
         self.file.seek(SeekFrom::Start(self.read_pointer)).await?;
         loop {
             let data = WalData::read(&mut self.file).await.map_err(match_error)?;

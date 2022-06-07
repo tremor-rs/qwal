@@ -316,6 +316,7 @@ impl Wal {
             dbg!(&rf);
             trace!("read_file.next_idx: {}", rf.next_idx_to_read);
             self.write_file.next_idx_to_read = rf.next_idx_to_read;
+            self.write_file.read_pointer = 0;
         }
 
         dbg!(&self.write_file);
@@ -542,7 +543,7 @@ mod test {
 
         assert_eq!(3, w.push(data.to_vec()).await?);
         assert_eq!(w.pop::<Vec<u8>>().await?, Some((3, data.to_vec())));
-        w.ack(3).await?;
+        // w.ack(3).await?;
         Ok(())
     }
 }
