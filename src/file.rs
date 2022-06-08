@@ -87,7 +87,7 @@ impl WalData {
             }
         } else {
             // read data
-            let mut data = Vec::with_capacity(len as usize);
+            let mut data = vec![0u8; len as usize];
             // We set the len since we know the len and then
             unsafe { data.set_len(len as usize) };
             f.read_exact(&mut data).await?;
@@ -119,10 +119,10 @@ impl WalData {
         }
     }
 
+    #[allow(clippy::uninit_vec)]
     async fn write(&self, w: &mut File) -> Result<u64> {
         let size_on_disk = self.size_on_disk() as usize;
-        let mut buf: Vec<u8> = Vec::with_capacity(size_on_disk);
-        unsafe { buf.set_len(size_on_disk) }
+        let mut buf: Vec<u8> = vec![0; size_on_disk];
         match self {
             WalData::Data { idx, ack_idx, data } => {
                 // id + ack_id + len + len (tailing len)
@@ -194,7 +194,7 @@ impl WalFile {
         let data = WalData::Ack {
             // we remove this since we usually ack with the previos index and this is no real data
             idx: self.next_idx_to_write - 1,
-            ack_idx: ack_idx,
+            ack_idx,
         };
         self.file.seek(SeekFrom::Start(self.write_offset)).await?;
         self.write_offset += data.write(&mut self.file).await?;
