@@ -313,13 +313,10 @@ impl Wal {
         }
         trace!("read_file => None");
         if let Some(rf) = self.read_file.take() {
-            dbg!(&rf);
             trace!("read_file.next_idx: {}", rf.next_idx_to_read);
             self.write_file.next_idx_to_read = rf.next_idx_to_read;
-            self.write_file.read_pointer = 0;
         }
 
-        dbg!(&self.write_file);
         self.write_file.pop::<E>().await.map_err(match_error)
     }
 
@@ -460,9 +457,9 @@ impl Wal {
     /// Current read index
     fn read_idx(&self) -> u64 {
         if let Some(read_file) = &self.read_file {
-            dbg!(read_file.next_idx_to_read)
+            read_file.next_idx_to_read
         } else {
-            dbg!(self.write_file.next_idx_to_read)
+            self.write_file.next_idx_to_read
         }
     }
 }
@@ -480,7 +477,6 @@ mod test {
         let path = temp_dir.path().to_path_buf();
 
         {
-            dbg!(1);
             let mut w = Wal::open(&path, 50, 10).await?;
 
             assert_eq!(w.push(b"1".to_vec()).await?, 1);
@@ -489,7 +485,6 @@ mod test {
             w.close().await?;
         }
         {
-            dbg!(2);
             let mut w = Wal::open(&path, 50, 10).await?;
 
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"1".to_vec())));
@@ -500,7 +495,6 @@ mod test {
             w.close().await?;
         }
         {
-            dbg!(3);
             let mut w = Wal::open(&path, 50, 10).await?;
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"22".to_vec())));
 
@@ -543,7 +537,7 @@ mod test {
 
         assert_eq!(3, w.push(data.to_vec()).await?);
         assert_eq!(w.pop::<Vec<u8>>().await?, Some((3, data.to_vec())));
-        // w.ack(3).await?;
+        w.ack(3).await?;
         Ok(())
     }
 }

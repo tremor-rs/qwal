@@ -63,7 +63,6 @@ impl WalData {
     const OFFSET_TAILING_LEN: usize = Self::OFFSET_ACK + size_of::<u64>();
 
     async fn read(f: &mut File) -> Result<Option<Self>> {
-        dbg!(&f);
         let mut buf = vec![0u8; size_of::<u64>() * 3];
 
         // read size
@@ -71,21 +70,17 @@ impl WalData {
             return Ok(None);
         }
         let len = BigEndian::read_u64(&buf[Self::OFFSET_LEN..]);
-        println!("{len:#X}");
-        dbg!(len);
 
         // read id
         let idx = BigEndian::read_u64(&buf[Self::OFFSET_IDX..]);
-        dbg!(idx);
         // read ack_id
         let ack_idx = BigEndian::read_u64(&buf[Self::OFFSET_ACK..]);
-        dbg!(ack_idx);
         if len == u64::MAX {
             let mut buf = vec![0u8; size_of::<u64>()];
             // THIS is a ack token
             f.read_exact(&mut buf).await?;
             let len2 = BigEndian::read_u64(&buf);
-            if dbg!(len2) != 0 {
+            if len2 != 0 {
                 Err(Error::InvalidAck)
             } else {
                 Ok(Some(Self::Ack { ack_idx, idx }))
@@ -193,13 +188,16 @@ impl WalFile {
     pub(crate) async fn preserve_ack(&mut self) -> Result<()> {
         trace!("Appending ack index {} to {:?}", self.ack_idx, self.file);
 
+        let ack_idx = self.ack_idx;
+        self.ack_written = ack_idx;
+
         let data = WalData::Ack {
             // we remove this since we usually ack with the previos index and this is no real data
             idx: self.next_idx_to_write - 1,
-            ack_idx: self.ack_idx,
+            ack_idx: ack_idx,
         };
         self.file.seek(SeekFrom::Start(self.write_offset)).await?;
-        data.write(&mut self.file).await?;
+        self.write_offset += data.write(&mut self.file).await?;
         self.sync().await
     }
 
@@ -238,7 +236,6 @@ impl WalFile {
     where
         E: Entry,
     {
-        dbg!(&self.read_pointer);
         self.file.seek(SeekFrom::Start(self.read_pointer)).await?;
         loop {
             let data = WalData::read(&mut self.file).await.map_err(match_error)?;
@@ -429,7 +426,6 @@ mod test {
         path.push("wal.file");
 
         {
-            dbg!(1);
             let mut w = WalFile::open(&path).await?;
 
             assert_eq!(w.push(b"1".to_vec()).await?, 1);
@@ -438,7 +434,6 @@ mod test {
             w.close().await?;
         }
         {
-            dbg!(2);
             let mut w = WalFile::open(&path).await?;
 
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"1".to_vec())));
@@ -449,7 +444,6 @@ mod test {
             w.close().await?;
         }
         {
-            dbg!(3);
             let mut w = WalFile::open(&path).await?;
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"22".to_vec())));
             w.ack(2);
