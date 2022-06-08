@@ -55,7 +55,11 @@ pub enum Error<EE: std::error::Error> {
     /// The WAL is exceeding it's limits and can not be written to
     SizeExceeded,
     /// Invalid ACK id is provided, it has to be between the last `ack` and the current `read`
-    InvalidAckId,
+    InvalidAckId {
+        ack_id: u64,
+        read_index: u64,
+        write_file_ack: u64,
+    },
     /// An invalid seek index has been given, it has to be after the last `ack` and before `write`
     InvalidIndex,
     /// Incompatible entry error
@@ -74,7 +78,7 @@ impl<EE: std::error::Error> Display for Error<EE> {
             Error::InvalidEntry => write!(f, "Invalid WAL entry (Entry)"),
             Error::InvalidFile => write!(f, "Invalid WAL File"),
             Error::SizeExceeded => write!(f, "WAL Size Exceeded"),
-            Error::InvalidAckId => write!(f, "Invalid Ack Index"),
+            Error::InvalidAckId{ ack_id, read_index, write_file_ack } => write!(f, "Invalid Ack Index {ack_id}, current read index: {read_index} write_file_ack: {write_file_ack}"),
             Error::InvalidIndex => write!(f, "Invalid Index"),
             Error::IncompatibleError => write!(f, "Incompatible error"),
             Error::Entry(e) => write!(f, "Entry Error: {e}"),
@@ -100,7 +104,15 @@ pub(crate) fn match_error<EE1: std::error::Error, EE2: std::error::Error>(
         Error::InvalidEntry => Error::InvalidEntry,
         Error::InvalidFile => Error::InvalidFile,
         Error::SizeExceeded => Error::SizeExceeded,
-        Error::InvalidAckId => Error::InvalidAckId,
+        Error::InvalidAckId {
+            ack_id,
+            read_index,
+            write_file_ack,
+        } => Error::InvalidAckId {
+            ack_id,
+            read_index,
+            write_file_ack,
+        },
         Error::InvalidIndex => Error::InvalidIndex,
         Error::IncompatibleError => Error::IncompatibleError,
         Error::Entry(_) => Error::IncompatibleError,
@@ -299,7 +311,12 @@ impl Wal {
             }
             break;
         }
-        self.read_file = None;
+        trace!("read_file => None");
+        if let Some(rf) = self.read_file.take() {
+            trace!("read_file.next_idx: {}", rf.next_idx_to_read);
+            self.write_file.next_idx_to_read = rf.next_idx_to_read;
+        }
+
         self.write_file.pop::<E>().await.map_err(match_error)
     }
 
@@ -321,7 +338,16 @@ impl Wal {
         trace!("ACKing {}", id);
 
         if self.read_idx() <= id || self.write_file.ack_idx > id {
-            return Err(Error::InvalidAckId);
+            trace!(
+                "read_idx: {}, write_file.ack_idx: {}",
+                self.read_idx(),
+                self.write_file.ack_idx
+            );
+            return Err(Error::InvalidAckId {
+                ack_id: id,
+                read_index: self.read_idx(),
+                write_file_ack: self.write_file.ack_idx,
+            });
         }
 
         self.write_file.ack(id);
@@ -451,7 +477,6 @@ mod test {
         let path = temp_dir.path().to_path_buf();
 
         {
-            dbg!(1);
             let mut w = Wal::open(&path, 50, 10).await?;
 
             assert_eq!(w.push(b"1".to_vec()).await?, 1);
@@ -460,7 +485,6 @@ mod test {
             w.close().await?;
         }
         {
-            dbg!(2);
             let mut w = Wal::open(&path, 50, 10).await?;
 
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, b"1".to_vec())));
@@ -471,7 +495,6 @@ mod test {
             w.close().await?;
         }
         {
-            dbg!(3);
             let mut w = Wal::open(&path, 50, 10).await?;
             assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, b"22".to_vec())));
 
@@ -490,6 +513,31 @@ mod test {
         let mut w = Wal::open(&path, 50, 10).await?;
         assert_eq!(w.pop::<Vec<u8>>().await?, None);
         temp_dir.close()?;
+        Ok(())
+    }
+
+    #[async_std::test]
+    async fn ack() -> Result<()> {
+        let temp_dir = TempDirBuilder::new().prefix("tremor-wal").tempdir()?;
+
+        let path = temp_dir.path().to_path_buf();
+        let mut w = Wal::open(&path, 128, 10).await?;
+        assert_eq!(w.pop::<Vec<u8>>().await?, None);
+
+        let data = [b'A'; 721];
+        assert_eq!(1, w.push(data.to_vec()).await?);
+        assert_eq!(w.pop::<Vec<u8>>().await?, Some((1, data.to_vec())));
+        w.ack(1).await?;
+
+        assert_eq!(2, w.push(data.to_vec()).await?);
+        // double-pop
+        assert_eq!(w.pop::<Vec<u8>>().await?, Some((2, data.to_vec())));
+        assert_eq!(w.pop::<Vec<u8>>().await?, None);
+        w.ack(2).await?;
+
+        assert_eq!(3, w.push(data.to_vec()).await?);
+        assert_eq!(w.pop::<Vec<u8>>().await?, Some((3, data.to_vec())));
+        w.ack(3).await?;
         Ok(())
     }
 }
