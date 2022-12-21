@@ -33,7 +33,8 @@ async fn bench_read_write(n: u32, size: usize) -> Result<()> {
 }
 
 const RUNS: u32 = 10000;
-#[async_std::main]
+#[cfg_attr(feature = "async-std", async_std::main)]
+#[cfg_attr(feature = "tokio", tokio::main)]
 async fn main() {
     let sizes = vec![0, 128, 1024, 1024 * 10, 1024 * 100];
     for size in sizes {

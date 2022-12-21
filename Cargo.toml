@@ -1,13 +1,25 @@
 [package]
 name = "qwal"
 version = "0.1.0"
-edition = "2018"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-std = { version = "1", features = ["attributes"] }
+tokio = { version = "1", features = [
+    "fs",
+    "io-util",
+    "macros",
+    "rt-multi-thread",
+], optional = true }
+async-std = { version = "1", features = ["attributes"], optional = true }
 byteorder = "1"
 
 [dev-dependencies]
 tempfile = "3"
+
+
+[features]
+default = ["tokio"]
+tokio = ["dep:tokio"]
+async-std = ["dep:async-std"]
