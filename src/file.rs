@@ -31,13 +31,20 @@ macro_rules! trace {
         concat!("[{}:{}] ", $s);
     };
 }
-
+#[cfg(feature = "async-std")]
 use async_std::{
     fs::{File, OpenOptions},
     io::prelude::*,
     path::Path,
 };
 use byteorder::{BigEndian, ByteOrder};
+#[cfg(feature = "tokio")]
+use std::path::Path;
+#[cfg(feature = "tokio")]
+use tokio::{
+    fs::{File, OpenOptions},
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
+};
 
 /// Represents entries in a write-ahead-log index data file
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -280,7 +287,7 @@ impl WalFile {
         let p: &Path = path.as_ref();
         let mut o = OpenOptions::new();
         trace!("Opening existing WAL file: {:?}", p.to_string_lossy());
-        if p.exists().await {
+        if exists(p).await {
             trace!("  Opening...");
             o.create(false);
             o.write(true);
@@ -413,13 +420,24 @@ impl WalFile {
     }
 }
 
+#[cfg(feature = "async-std")]
+async fn exists(p: &Path) -> bool {
+    p.exists().await
+}
+
+#[cfg(feature = "tokio")]
+async fn exists(p: &Path) -> bool {
+    p.exists()
+}
+
 #[cfg(test)]
 mod test {
 
     use super::*;
     use tempfile::Builder as TempDirBuilder;
 
-    #[async_std::test]
+    #[cfg_attr(feature = "async-std", async_std::test)]
+    #[cfg_attr(feature = "tokio", tokio::test)]
     async fn file() -> Result<()> {
         let temp_dir = TempDirBuilder::new().prefix("tremor-wal").tempdir()?;
         let mut path = temp_dir.path().to_path_buf();

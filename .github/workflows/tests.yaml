@@ -4,6 +4,13 @@ on: [push, pull_request]
 
 jobs:
   tests-linux:
+    strategy:
+      matrix:
+        features:
+          - feature: tokio
+            name: tokio
+          - feature: async-std
+            name: asyncstd
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
@@ -21,7 +28,8 @@ jobs:
           PROPTEST_CASES: 2500
           RUSTFLAGS: -D warnings -C target-feature=+avx,+avx2,+sse4.2
           RUST_BACKTRACE: 1
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.txt
+        run: cargo llvm-cov --workspace --lcov --output-path lcov.txt --features ${{ matrix.features.feature }} --no-default-features
       - uses: codecov/codecov-action@v3
         with:
+          flags: ${{ matrix.features.name }}
           files: ./lcov.txt

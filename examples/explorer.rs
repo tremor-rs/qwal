@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use qwal::WalFile;
-#[async_std::main]
+
+#[cfg_attr(feature = "async-std", async_std::main)]
+#[cfg_attr(feature = "tokio", tokio::main)]
 async fn main() {
     let file = std::env::args()
-        .skip(1)
-        .next()
+        .nth(1)
         .expect("One argument needs to be supplie");
     print!("File: {file}");
 

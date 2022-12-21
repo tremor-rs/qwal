@@ -17,6 +17,14 @@
 
 Pronouced `Quál` - from the german word for `agony` - because it is.
 
+## features
+
+### tokio
+uses the tokio types
+
+### async-std
+uses async-std types
+
 
 
 ## Operations

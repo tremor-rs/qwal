@@ -14,6 +14,7 @@
 
 mod entry;
 mod file;
+#[cfg(feature = "async-std")]
 use async_std::{
     fs,
     path::{Path, PathBuf},
@@ -21,7 +22,11 @@ use async_std::{
 };
 pub use entry::Entry;
 pub use file::WalFile;
+#[cfg(feature = "tokio")]
+use std::path::{Path, PathBuf};
 use std::{convert::Infallible, ffi::OsStr, fmt::Display, io};
+#[cfg(feature = "tokio")]
+use tokio::fs;
 
 #[cfg(test)]
 macro_rules! trace {
@@ -198,7 +203,7 @@ impl Wal {
         }
         let mut files = Vec::new();
         let mut rd = fs::read_dir(path).await?;
-        while let Some(file) = rd.next().await {
+        while let Some(file) = next_dir_entry(&mut rd).await {
             let file = file?.path();
             if fs::metadata(&file).await?.is_file() {
                 let first_idx: u64 = file
@@ -464,13 +469,23 @@ impl Wal {
     }
 }
 
+#[cfg(feature = "async-std")]
+async fn next_dir_entry(rd: &mut fs::ReadDir) -> Option<io::Result<fs::DirEntry>> {
+    rd.next().await
+}
+#[cfg(feature = "tokio")]
+async fn next_dir_entry(rd: &mut fs::ReadDir) -> Option<io::Result<fs::DirEntry>> {
+    rd.next_entry().await.transpose()
+}
+
 #[cfg(test)]
 mod test {
 
     use super::*;
     use tempfile::Builder as TempDirBuilder;
 
-    #[async_std::test]
+    #[cfg_attr(feature = "async-std", async_std::test)]
+    #[cfg_attr(feature = "tokio", tokio::test)]
     async fn wal() -> Result<()> {
         let temp_dir = TempDirBuilder::new().prefix("tremor-wal").tempdir()?;
 
@@ -516,7 +531,8 @@ mod test {
         Ok(())
     }
 
-    #[async_std::test]
+    #[cfg_attr(feature = "async-std", async_std::test)]
+    #[cfg_attr(feature = "tokio", tokio::test)]
     async fn ack() -> Result<()> {
         let temp_dir = TempDirBuilder::new().prefix("tremor-wal").tempdir()?;
 
