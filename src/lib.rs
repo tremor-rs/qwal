@@ -157,7 +157,7 @@ pub type Result<T> = std::result::Result<T, Error<Infallible>>;
 /// ```text
 ///           .ack                                     .write
 /// |--------------------------------------------------|
-/// 'start                    'read                    
+/// 'start                    'read
 /// ```
 ///
 /// - Entries between `start` and `ack` are acknowledged and will be recycled evnetually, they can
@@ -424,7 +424,7 @@ impl Wal {
 
     /// Name formating for WAL files
     fn format_file_name(idx: u64) -> String {
-        format!("{:020}", idx)
+        format!("{idx:020}")
     }
 
     /// Seeks to a given index in the Wal files

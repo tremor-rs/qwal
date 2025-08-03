@@ -273,7 +273,7 @@ impl WalFile {
         let mut file = o.open(&path).await?;
         let mut offset = 0;
         while let Some(data) = WalData::read(&mut file).await? {
-            println!("{offset:9}: {:?}", data);
+            println!("{offset:9}: {data:?}");
             offset = file.seek(SeekFrom::Current(0)).await?
         }
         Ok(())
